@@ -32,10 +32,23 @@ int __vectorcall call_vector(int a, int b)
     return a + b;
 }
 
+int __vectorcall call_vector7(int a1, int a2, int a3, int a4, int a5, int a6, int a7)
+{
+    return 7;
+    /// ret 14h /// 20 / 4 = 5;  5 + 2= 7
+}
+
 // int __clrcall test()
 // {
 //     return 1;
 // }
+
+int abc(int a, int b, int c)
+{
+    printf("技能释放 a=%d, b = %d, c=%d\n", a, b, c);
+    return a + b + c;
+}
+
 int main()
 {
     int a = 333;
@@ -48,5 +61,12 @@ int main()
 
     printf(" call_vector()=%d行号=%d\r\n", call_vector(0x11D, 0xD11), __LINE__);
 
+    //////////////////////////////////////////////////////////////////
+
+
+    printf(" call_vector7()=%d行号=%d\r\n", call_vector7(0x111, 0x222, 0x333, 0x444, 0x555, 0x666, 0x777), __LINE__);
+
+    printf("释放技能 abc = %d\r\n", abc(0x123, 2, 6));
+    getchar();
     return 1;
 }
