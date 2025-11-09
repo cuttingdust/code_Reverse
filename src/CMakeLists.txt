@@ -12,9 +12,9 @@ if(MSVC)
 endif()
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
-if(MSVC)
- set(CMAKE_GENERATOR_PLATFORM x64)
-endif()
+# if(MSVC)
+ # set(CMAKE_GENERATOR_PLATFORM x64)
+# endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -66,11 +66,15 @@ add_subdirectory(GetWindowThreadProcess)
 add_subdirectory(ReadProcessMemory)
 add_subdirectory(ReadProcessMemory_basepointer)
 add_subdirectory(WriteProcessMemory)
-add_subdirectory(assembly)
+if(CMAKE_GENERATOR_PLATFORM STREQUAL "x64")
 add_subdirectory(assembly_x64)
-add_subdirectory(DBG_TOOL_TEST)
-add_subdirectory(DBG_TOOL_CALL_RET)
-add_subdirectory(DBG_TOOL_STD_CALL)
+elseif(CMAKE_GENERATOR_PLATFORM STREQUAL "Win32")
+add_subdirectory(assembly)
+endif()
+add_subdirectory(DBG_TOOL_CALL_RET_TEST)
+add_subdirectory(DBG_TOOL_VARIABLE_TYPE_TEST)
+add_subdirectory(DBG_TOOL_x86_CALL_TEST)
+add_subdirectory(DBG_TOOL_x64_CALL_TEST)
 
 
 # # 拷贝assert目录到输出目录
