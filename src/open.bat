@@ -1,2 +1,2 @@
 @echo off
-cmake --open build
+cmake --open build_Win64
