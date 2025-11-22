@@ -77,6 +77,7 @@ add_subdirectory(DBG_TOOL_x86_CALL_TEST)
 add_subdirectory(DBG_TOOL_x64_CALL_TEST)
 add_subdirectory(DBG_TOOL_x64_IF_TEST)
 add_subdirectory(DBG_TOOL_x86_WHILE_TEST)
+add_subdirectory(DBG_TOOL_x64_REGISTER_TEST)
 
 
 # # 拷贝assert目录到输出目录
