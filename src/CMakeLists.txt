@@ -66,6 +66,8 @@ add_subdirectory(GetWindowThreadProcess)
 add_subdirectory(ReadProcessMemory)
 add_subdirectory(ReadProcessMemory_basepointer)
 add_subdirectory(WriteProcessMemory)
+add_subdirectory(CreateRemoteThread)
+###########################################
 if(CMAKE_GENERATOR_PLATFORM STREQUAL "x64")
 add_subdirectory(assembly_x64)
 elseif(CMAKE_GENERATOR_PLATFORM STREQUAL "Win32")
