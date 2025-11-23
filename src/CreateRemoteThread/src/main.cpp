@@ -6,6 +6,48 @@
 #include <algorithm>
 #include <vector>
 
+///////////////////////////////////////////////////////////////////////////////////
+/// 参数结构体定义
+///////////////////////////////////////////////////////////////////////////////////
+
+/**
+ * @brief 多参数结构体，用于打包多个参数
+ */
+struct RemoteParams
+{
+    DWORD_PTR param1;
+    DWORD_PTR param2;
+    DWORD_PTR param3;
+    DWORD_PTR param4;
+
+    RemoteParams(DWORD_PTR p1 = 0, DWORD_PTR p2 = 0, DWORD_PTR p3 = 0, DWORD_PTR p4 = 0) :
+        param1(p1), param2(p2), param3(p3), param4(p4)
+    {
+    }
+};
+
+/**
+ * @brief 字符串参数结构体
+ */
+struct RemoteStringParams
+{
+    DWORD_PTR intParam1;
+    DWORD_PTR intParam2;
+    wchar_t   strParam1[256];
+    wchar_t   strParam2[256];
+
+    RemoteStringParams(DWORD_PTR p1 = 0, DWORD_PTR p2 = 0, const wchar_t* s1 = L"", const wchar_t* s2 = L"") :
+        intParam1(p1), intParam2(p2)
+    {
+        wcscpy_s(strParam1, s1 ? s1 : L"");
+        wcscpy_s(strParam2, s2 ? s2 : L"");
+    }
+};
+
+///////////////////////////////////////////////////////////////////////////////////
+/// 原有的进程查找函数（保持不变）
+///////////////////////////////////////////////////////////////////////////////////
+
 /**
  * @brief 根据窗口标题获取进程PID（宽字符版本）
  * @param windowTitle 窗口标题
@@ -132,6 +174,57 @@ DWORD GetProcessPIDByClassName(const std::wstring& className)
     return processId;
 }
 
+///////////////////////////////////////////////////////////////////////////////////
+/// 内存操作函数
+///////////////////////////////////////////////////////////////////////////////////
+
+/**
+ * @brief 在远程进程中分配内存并写入数据
+ */
+LPVOID AllocateAndWriteRemoteMemory(HANDLE hProcess, LPVOID localData, SIZE_T dataSize)
+{
+    if (!hProcess || !localData || dataSize == 0)
+    {
+        return nullptr;
+    }
+
+    // 在远程进程中分配内存
+    LPVOID remoteMemory = ::VirtualAllocEx(hProcess, nullptr, dataSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (remoteMemory == nullptr)
+    {
+        std::wcerr << L"错误: 无法在远程进程中分配内存" << std::endl;
+        return nullptr;
+    }
+
+    // 将数据写入远程内存
+    SIZE_T bytesWritten = 0;
+    if (!::WriteProcessMemory(hProcess, remoteMemory, localData, dataSize, &bytesWritten))
+    {
+        std::wcerr << L"错误: 无法写入远程内存" << std::endl;
+        ::VirtualFreeEx(hProcess, remoteMemory, 0, MEM_RELEASE);
+        return nullptr;
+    }
+
+    std::wcout << L"远程内存分配成功: 0x" << std::hex << remoteMemory << L", 大小: " << std::dec << dataSize << L" 字节"
+               << std::endl;
+
+    return remoteMemory;
+}
+
+/**
+ * @brief 释放远程内存
+ */
+void FreeRemoteMemory(HANDLE hProcess, LPVOID remoteMemory)
+{
+    if (hProcess && remoteMemory)
+    {
+        ::VirtualFreeEx(hProcess, remoteMemory, 0, MEM_RELEASE);
+        std::wcout << L"已释放远程内存: 0x" << std::hex << remoteMemory << std::dec << std::endl;
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////////
+/// 架构检测和地址分析函数（保持不变）
 ///////////////////////////////////////////////////////////////////////////////////
 
 /**
@@ -391,7 +484,9 @@ void PrintParameterDetailsSimple(LPVOID parameter, DWORD processId = 0)
     }
 }
 
-//////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////
+/// 增强的远程线程执行函数（支持多参数）
+///////////////////////////////////////////////////////////////////////////////////
 
 
 /**
@@ -604,7 +699,8 @@ void OptimizedCallbackCall()
     if (pid != 0)
     {
         // LPVOID functionAddress = reinterpret_cast<LPVOID>(0x00C91046); /// 目标函数地址 call00=00C91046
-        LPVOID functionAddress = reinterpret_cast<LPVOID>(0x00C91299); /// 目标函数地址 call00=00C91299
+        // LPVOID functionAddress = reinterpret_cast<LPVOID>(0x00C91299); /// 目标函数地址 call01=00C91299
+        LPVOID functionAddress = reinterpret_cast<LPVOID>(0x00C91177); /// 目标函数地址 call02=00C91177
 
 
         LPVOID parameter = reinterpret_cast<LPVOID>(123);
