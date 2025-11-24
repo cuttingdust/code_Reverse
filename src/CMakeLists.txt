@@ -35,6 +35,17 @@ if(OpenMP_FOUND)
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
 endif()
 
+# MFC
+find_package(MFC)
+message("MFC_FOUND = ${MFC_FOUND}")
+
+if(MFC_FOUND)
+# 1: static MFC library, 2: shared MFC library
+set(CMAKE_MFC_FLAG 2)
+endif()
+
+#==================================================================================#
+
 message(STATUS "CMAKE_CXX_COMPILER = ${CMAKE_CXX_COMPILER}")
 
 # 外部依赖项
@@ -79,8 +90,8 @@ add_subdirectory(DBG_TOOL_x86_CALL_TEST)
 add_subdirectory(DBG_TOOL_x64_CALL_TEST)
 add_subdirectory(DBG_TOOL_x64_IF_TEST)
 add_subdirectory(DBG_TOOL_x86_WHILE_TEST)
-add_subdirectory(DBG_TOOL_x64_REGISTER_TEST)
-
+add_subdirectory(DBG_TOOL_x64_REGISTER_TEST) # 错误 注入器现在只能注入x86的
+add_subdirectory(DBG_TOOL_x86_MFC_DLL)
 
 # # 拷贝assert目录到输出目录
 # set(ASSERT_PATH ${CMAKE_CURRENT_SOURCE_DIR}/assert)
