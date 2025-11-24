@@ -97,10 +97,29 @@ macro(get_src_include)
     list(APPEND SRC ${SOURCE})
 	# message("SRC = ${SRC}")
 	
+	###################################################################
+	
 	FILE(GLOB H_FILE_I ${CMAKE_CURRENT_LIST_DIR}/include/*.h)
     
+	##################################################################
+	
 	# 安装的时候 不暴露出去
 	FILE(GLOB RC_FILE ${CMAKE_CURRENT_LIST_DIR}/src/*.rc)
+	# 新增：将 resource.h
+    FILE(GLOB RESOURCE_H_FILES
+        ${CMAKE_CURRENT_LIST_DIR}/src/resource.h
+        ${CMAKE_CURRENT_LIST_DIR}/src/RESOURCE.h
+        ${CMAKE_CURRENT_LIST_DIR}/src/Resource.h
+        ${CMAKE_CURRENT_LIST_DIR}/include/resource.h
+        ${CMAKE_CURRENT_LIST_DIR}/include/RESOURCE.h
+        ${CMAKE_CURRENT_LIST_DIR}/include/Resource.h
+    )
+    
+    if(RESOURCE_H_FILES)
+        list(APPEND RC_FILE ${RESOURCE_H_FILES})
+        message(STATUS "找到 resource.h 文件: ${RESOURCE_H_FILES}")
+    endif()
+	
     FILE(GLOB UI_FILES ${CMAKE_CURRENT_LIST_DIR}/src/*.ui)
     FILE(GLOB QRC_SOURCE_FILES ${CMAKE_CURRENT_LIST_DIR}/src/*.qrc)
 	FILE(GLOB PROTO_FILES ${CMAKE_CURRENT_LIST_DIR}/src/*.proto)
