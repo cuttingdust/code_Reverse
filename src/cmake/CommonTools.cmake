@@ -21,33 +21,13 @@ set(SDK_LIB_DIRECTORY
 	# $ENV{MYSQL_SERVER80}/lib
 )
 
-# 根据 -A 参数设置输出路径
-if(CMAKE_GENERATOR_PLATFORM)
-    # 将平台名称映射到标准架构名称
-    if(CMAKE_GENERATOR_PLATFORM STREQUAL "Win32")
-        set(ARCH_SUFFIX ".x86")
-    elseif(CMAKE_GENERATOR_PLATFORM STREQUAL "x64")
-        set(ARCH_SUFFIX ".x64")
-    elseif(CMAKE_GENERATOR_PLATFORM STREQUAL "ARM64")
-        set(ARCH_SUFFIX ".arm64")
-    else()
-        set(ARCH_SUFFIX ".${CMAKE_GENERATOR_PLATFORM}")
-    endif()
-else()
-    # 默认架构
-    set(ARCH_SUFFIX ".x64")
-endif()
-
 # 输出路径
 set(OUT ${CMAKE_CURRENT_SOURCE_DIR}/../out)
 message("out = ${OUT}")
-
-set(OUT_DLL_PATH ${OUT}/bin${ARCH_SUFFIX})
+set(OUT_LIB_PATH ${OUT}/lib)
+set(OUT_DLL_PATH ${OUT}/bin.x64)
 set(OUT_INCLUDE_PATH ${OUT}/include)
-set(OUT_RUN_PATH ${OUT}/bin${ARCH_SUFFIX})
-
-message(STATUS "输出路径架构后缀: ${ARCH_SUFFIX}")
-message(STATUS "DLL 路径: ${OUT_DLL_PATH}")
+set(OUT_RUN_PATH ${OUT}/bin.x64)
 
 # 安装与查找
 string(REPLACE "\\" "/" INSTALL_PREFIX ${OUT})
@@ -93,18 +73,36 @@ set(LOG_MOUDLES
 macro(get_src_include)
     aux_source_directory(${CMAKE_CURRENT_LIST_DIR}/src SRC)
     aux_source_directory(${CMAKE_CURRENT_LIST_DIR}/Source SOURCE)
+	aux_source_directory(${CMAKE_CURRENT_LIST_DIR} SRC_CURRENT)
 
     list(APPEND SRC ${SOURCE})
+    list(APPEND SRC ${SRC_CURRENT})
 	# message("SRC = ${SRC}")
 	
 	###################################################################
 	
-	FILE(GLOB H_FILE_I ${CMAKE_CURRENT_LIST_DIR}/include/*.h)
-    
-	##################################################################
+	FILE(GLOB H_FILE_I 
+		${CMAKE_CURRENT_LIST_DIR}/include/*.h
+		${CMAKE_CURRENT_LIST_DIR}/*.h
+	)
+	# message("H_FILE_I = ${H_FILE_I}")
 	
+	##################################################################
+	FILE(GLOB ASM_FILES 
+		${CMAKE_CURRENT_LIST_DIR}/asm/*.asm
+		${CMAKE_CURRENT_LIST_DIR}/*.asm
+	)
+	# message("ASM_FILES = ${ASM_FILES}")
+	
+	##################################################################
 	# 安装的时候 不暴露出去
-	FILE(GLOB RC_FILE ${CMAKE_CURRENT_LIST_DIR}/src/*.rc)
+
+	FILE(GLOB RC_FILE 
+		${CMAKE_CURRENT_LIST_DIR}/src/*.rc
+		${CMAKE_CURRENT_LIST_DIR}/*.rc
+	)
+	# message("H_FILE_I = ${H_FILE_I}")
+	
 	# 新增：将 resource.h
     FILE(GLOB RESOURCE_H_FILES
         ${CMAKE_CURRENT_LIST_DIR}/src/resource.h
@@ -113,28 +111,33 @@ macro(get_src_include)
         ${CMAKE_CURRENT_LIST_DIR}/include/resource.h
         ${CMAKE_CURRENT_LIST_DIR}/include/RESOURCE.h
         ${CMAKE_CURRENT_LIST_DIR}/include/Resource.h
+		${CMAKE_CURRENT_LIST_DIR}/resource.h
     )
     
     if(RESOURCE_H_FILES)
         list(APPEND RC_FILE ${RESOURCE_H_FILES})
         message(STATUS "找到 resource.h 文件: ${RESOURCE_H_FILES}")
     endif()
-	
-    FILE(GLOB UI_FILES ${CMAKE_CURRENT_LIST_DIR}/src/*.ui)
-    FILE(GLOB QRC_SOURCE_FILES ${CMAKE_CURRENT_LIST_DIR}/src/*.qrc)
-	FILE(GLOB PROTO_FILES ${CMAKE_CURRENT_LIST_DIR}/src/*.proto)
-	FILE(GLOB ASM_FILES ${CMAKE_CURRENT_LIST_DIR}/asm/*.asm)
 
     if(RC_FILE)
         source_group("Resource Files" FILES ${RC_FILE})
     endif()
 
+	FILE(GLOB UI_FILES 
+		${CMAKE_CURRENT_LIST_DIR}/src/*.ui
+		${CMAKE_CURRENT_LIST_DIR}/*.ui
+	)
+	
     if(UI_FILES)
         qt_wrap_ui(UIC_HEADER ${UI_FILES})
         source_group("Resource Files" FILES ${UI_FILES})
         source_group("Generate Files" FILES ${UIC_HEADER})
     endif()
 
+	FILE(GLOB QRC_SOURCE_FILES 
+		${CMAKE_CURRENT_LIST_DIR}/*.qrc
+		${CMAKE_CURRENT_LIST_DIR}/src/*.qrc
+	)
     if(QRC_SOURCE_FILES)
         qt6_add_resources(QRC_FILES ${QRC_SOURCE_FILES})
         # qt_wrap_cpp() moc 相关
@@ -142,6 +145,10 @@ macro(get_src_include)
 		source_group("Generate Files" FILES ${QRC_FILES})
     endif()
 	
+	FILE(GLOB PROTO_FILES 
+		${CMAKE_CURRENT_LIST_DIR}/src/*.proto
+		${CMAKE_CURRENT_LIST_DIR}/*.proto
+	)
 	if(PROTO_FILES)
 		source_group("Resource Files" FILES ${PROTO_FILES})
 		if(PROTOC_EXECUTABLE)
@@ -260,24 +267,17 @@ macro(set_cpp name)
 			-D_CRT_SECURE_NO_WARNINGS
 		)
 		
-		if(!ASM_FILES)
-			 set_target_properties(${name} PROPERTIES
-				COMPILE_FLAGS "/Zc:wchar_t"	# 是
-				#COMPILE_FLAGS "/Zc:wchar_t-" #否
-			)
-		endif()
-       
+        set_target_properties(${name} PROPERTIES
+            COMPILE_FLAGS "/Zc:wchar_t"	# 是
+			#COMPILE_FLAGS "/Zc:wchar_t-" #否
+        )
+
         # set_target_properties(${name} PROPERTIES
         # COMPILE_FLAGS "-bigobj"
         # )
         set_target_properties(${PROJECT_NAME} PROPERTIES
             MSVC_RUNTIME_LIBRARY MultiThreadedDLL
         )
-		
-		if(ASM_FILES)
-			# 设置 MASM 汇编选项（如果需要的话）
-			set_source_files_properties(${ASM_FILES} PROPERTIES LANGUAGE ASM_MASM)
-		endif()
     endif()
 
     if(CMAKE_BUILD_TYPE STREQUAL "")
@@ -344,7 +344,6 @@ function(cpp_library name)
 		
 		${SRC}
         ${H_FILE_I}
-		${ASM_FILES}
     )
 
 
@@ -421,7 +420,6 @@ function(cpp_execute name)
 		
 		${SRC}
         ${H_FILE_I}
-		${ASM_FILES}
     )
 
     # 设置配置信息

@@ -6,46 +6,25 @@
 #include <algorithm>
 #include <vector>
 
-///////////////////////////////////////////////////////////////////////////////////
-/// 参数结构体定义
-///////////////////////////////////////////////////////////////////////////////////
-
-/**
- * @brief 多参数结构体，用于打包多个参数
- */
-struct RemoteParams
+__declspec(naked) int registerCAll()
 {
-    DWORD_PTR param1;
-    DWORD_PTR param2;
-    DWORD_PTR param3;
-    DWORD_PTR param4;
-
-    RemoteParams(DWORD_PTR p1 = 0, DWORD_PTR p2 = 0, DWORD_PTR p3 = 0, DWORD_PTR p4 = 0) :
-        param1(p1), param2(p2), param3(p3), param4(p4)
+    /// int call02 = 0x0041121c;
+    _asm
     {
+		push 2
+		push 1
+		mov eax, 0x00081177 /// call02 2个参数
+		call eax
+		; call 0x00081177 这种写法在vs环境是错误的
+		add esp, 8
+		mov eax,0x12345678
+		ret /// 关键 在裸汇编中必须加上ret 才能正常返回
     }
-};
+}
 
-/**
- * @brief 字符串参数结构体
- */
-struct RemoteStringParams
-{
-    DWORD_PTR intParam1;
-    DWORD_PTR intParam2;
-    wchar_t   strParam1[256];
-    wchar_t   strParam2[256];
-
-    RemoteStringParams(DWORD_PTR p1 = 0, DWORD_PTR p2 = 0, const wchar_t* s1 = L"", const wchar_t* s2 = L"") :
-        intParam1(p1), intParam2(p2)
-    {
-        wcscpy_s(strParam1, s1 ? s1 : L"");
-        wcscpy_s(strParam2, s2 ? s2 : L"");
-    }
-};
 
 ///////////////////////////////////////////////////////////////////////////////////
-/// 原有的进程查找函数（保持不变）
+/// 原有的进程查找函数
 ///////////////////////////////////////////////////////////////////////////////////
 
 /**
@@ -177,7 +156,6 @@ DWORD GetProcessPIDByClassName(const std::wstring& className)
 ///////////////////////////////////////////////////////////////////////////////////
 /// 内存操作函数
 ///////////////////////////////////////////////////////////////////////////////////
-
 /**
  * @brief 在远程进程中分配内存并写入数据
  */
@@ -188,15 +166,16 @@ LPVOID AllocateAndWriteRemoteMemory(HANDLE hProcess, LPVOID localData, SIZE_T da
         return nullptr;
     }
 
-    // 在远程进程中分配内存
-    LPVOID remoteMemory = ::VirtualAllocEx(hProcess, nullptr, dataSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    /// 在远程进程中分配内存
+    LPVOID remoteMemory = ::VirtualAllocEx(hProcess, NULL, dataSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if (remoteMemory == nullptr)
     {
         std::wcerr << L"错误: 无法在远程进程中分配内存" << std::endl;
         return nullptr;
     }
+    std::wcout << L"远程内存分配地址: 0x" << std::hex << remoteMemory << std::dec << std::endl;
 
-    // 将数据写入远程内存
+    /// 将数据写入远程内存
     SIZE_T bytesWritten = 0;
     if (!::WriteProcessMemory(hProcess, remoteMemory, localData, dataSize, &bytesWritten))
     {
@@ -210,6 +189,7 @@ LPVOID AllocateAndWriteRemoteMemory(HANDLE hProcess, LPVOID localData, SIZE_T da
 
     return remoteMemory;
 }
+
 
 /**
  * @brief 释放远程内存
@@ -518,7 +498,7 @@ bool ExecuteRemoteThread(DWORD processId, LPVOID functionAddress, LPVOID paramet
     std::wcout << L"目标进程PID: " << processId << std::endl;
     std::wcout << L"函数地址: 0x" << std::hex << functionAddress << std::dec << std::endl;
     std::wcout << L"参数: ";
-    PrintParameterDetails(parameter, processId); /// 使用简化版本
+    PrintParameterDetails(parameter, processId);
     std::wcout << L"访问权限: 0x" << std::hex << accessRights << std::dec << std::endl;
     std::wcout << L"=========================" << std::endl;
 
@@ -532,20 +512,43 @@ bool ExecuteRemoteThread(DWORD processId, LPVOID functionAddress, LPVOID paramet
     }
 
     std::wcout << L"成功打开目标进程句柄: 0x" << std::hex << hProcess << std::dec << std::endl;
+    HANDLE hRemoteThread = NULL;
 
-    /// 在远程进程中创建线程
-    HANDLE hRemoteThread = ::CreateRemoteThread(hProcess, /// 目标进程句柄
-                                                nullptr,  /// 安全属性
-                                                0,        /// 堆栈大小
-                                                reinterpret_cast<LPTHREAD_START_ROUTINE>(functionAddress), /// 函数地址
-                                                parameter,                                                 /// 参数
-                                                0,                                                         /// 创建标志
-                                                nullptr                                                    /// 线程ID
-    );
+    /// 注入函数地址调用(最多单参数)
+    {
+        /// 在远程进程中创建线程
+        // hRemoteThread = ::CreateRemoteThread(hProcess,                                                  /// 目标进程句柄
+        //                                      nullptr,                                                   /// 安全属性
+        //                                      0,                                                         /// 堆栈大小
+        //                                      reinterpret_cast<LPTHREAD_START_ROUTINE>(functionAddress), /// 函数地址
+        //                                      parameter,                                                 /// 参数
+        //                                      0,                                                         /// 创建标志
+        //                                      nullptr                                                    /// 线程ID
+        // );
+    }
+
+    /// 注入裸汇编代码(多参数调用)
+    {
+        auto targetMemory = AllocateAndWriteRemoteMemory(hProcess, registerCAll, 4 * 1024);
+        if (targetMemory != NULL)
+        {
+            /// 注入远程线程执行裸汇编代码
+            hRemoteThread = ::CreateRemoteThread(hProcess, /// 目标进程句柄
+                                                 nullptr,  /// 安全属性
+                                                 0,        /// 堆栈大小
+                                                 reinterpret_cast<LPTHREAD_START_ROUTINE>(targetMemory), /// 函数地址
+                                                 parameter,                                              /// 参数
+                                                 0,                                                      /// 创建标志
+                                                 nullptr                                                 /// 线程ID
+            );
+        }
+        FreeRemoteMemory(hProcess, targetMemory);
+    }
+
 
     bool success = false;
 
-    if (hRemoteThread != nullptr)
+    if (hRemoteThread != NULL)
     {
         std::wcout << L"远程线程创建成功，线程句柄: 0x" << std::hex << hRemoteThread << std::dec << std::endl;
 
@@ -628,6 +631,8 @@ bool ExecuteRemoteThreadSafely(DWORD processId, LPVOID functionAddress, LPVOID p
     DWORD accessRights = PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION | PROCESS_VM_WRITE |
             PROCESS_VM_READ;
 
+    // DWORD accessRights = PROCESS_ALL_ACCESS;
+
     return ExecuteRemoteThread(processId, functionAddress, parameter, accessRights);
 }
 
@@ -670,7 +675,7 @@ void ExampleUsageByProcessName()
 
 
 /**
- * @brief 优化的回调调用函数
+ * @brief 回调调用函数
  */
 void CallbackCall()
 {
@@ -698,12 +703,8 @@ void CallbackCall()
 
     if (pid != 0)
     {
-        // LPVOID functionAddress = reinterpret_cast<LPVOID>(0x00C91046); /// 目标函数地址 call00=00C91046
-        // LPVOID functionAddress = reinterpret_cast<LPVOID>(0x00C91299); /// 目标函数地址 call01=00C91299
-        LPVOID functionAddress = reinterpret_cast<LPVOID>(0x00C91177); /// 目标函数地址 call02=00C91177
-
-
-        LPVOID parameter = reinterpret_cast<LPVOID>(123);
+        LPVOID functionAddress = reinterpret_cast<LPVOID>(0x00C91046);
+        LPVOID parameter       = reinterpret_cast<LPVOID>(123);
 
         if (ExecuteRemoteThreadSafely(pid, functionAddress, parameter))
         {
@@ -763,7 +764,7 @@ int main()
     /// 使用优化后的版本
     CallbackCall();
 
-    // 或者使用其他示例
+    /// 或者使用其他示例
     // ExampleUsageByWindowTitle();
     // ExampleUsageByProcessName();
 

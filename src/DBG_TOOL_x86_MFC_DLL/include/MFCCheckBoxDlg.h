@@ -1,18 +1,12 @@
-﻿
-// MFCCheckBoxDlg.h: 头文件
-//
-
-#pragma once
+﻿#pragma once
 
 
-// CMFCCheckBoxDlg 对话框
 class MFCCheckBoxDlg : public CDialogEx
 {
-    // 构造
 public:
-    MFCCheckBoxDlg(CWnd* pParent = nullptr); // 标准构造函数
+    MFCCheckBoxDlg(CWnd* pParent = nullptr); /// 标准构造函数
 
-// 对话框数据
+/// 对话框数据
 #ifdef AFX_DESIGN_TIME
     enum
     {
@@ -24,11 +18,11 @@ protected:
     virtual void DoDataExchange(CDataExchange* pDX); // DDX/DDV 支持
 
 
-    // 实现
+    /// 实现
 protected:
     HICON m_hIcon;
 
-    // 生成的消息映射函数
+    /// 生成的消息映射函数
     virtual BOOL    OnInitDialog();
     afx_msg void    OnSysCommand(UINT nID, LPARAM lParam);
     afx_msg void    OnPaint();

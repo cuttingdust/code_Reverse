@@ -78,6 +78,7 @@ add_subdirectory(ReadProcessMemory)
 add_subdirectory(ReadProcessMemory_basepointer)
 add_subdirectory(WriteProcessMemory)
 add_subdirectory(CreateRemoteThread)
+add_subdirectory(CreateRemoteThread_VirtualAllocEx)
 ###########################################
 if(CMAKE_GENERATOR_PLATFORM STREQUAL "x64")
 add_subdirectory(assembly_x64)
@@ -92,6 +93,7 @@ add_subdirectory(DBG_TOOL_x64_IF_TEST)
 add_subdirectory(DBG_TOOL_x86_WHILE_TEST)
 add_subdirectory(DBG_TOOL_x64_REGISTER_TEST) # 错误 注入器现在只能注入x86的
 add_subdirectory(DBG_TOOL_x86_MFC_DLL)
+
 
 # # 拷贝assert目录到输出目录
 # set(ASSERT_PATH ${CMAKE_CURRENT_SOURCE_DIR}/assert)
