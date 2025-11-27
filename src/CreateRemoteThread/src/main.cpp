@@ -1,772 +1,679 @@
 #include <Windows.h>
 #include <TlHelp32.h>
-
 #include <string>
 #include <iostream>
 #include <algorithm>
 #include <vector>
+#include <memory>
 
 ///////////////////////////////////////////////////////////////////////////////////
-/// 参数结构体定义
+/// 常量定义
 ///////////////////////////////////////////////////////////////////////////////////
 
-/**
- * @brief 多参数结构体，用于打包多个参数
- */
-struct RemoteParams
+namespace Constants
 {
-    DWORD_PTR param1;
-    DWORD_PTR param2;
-    DWORD_PTR param3;
-    DWORD_PTR param4;
+    const std::wstring TARGET_PROCESS_NAME = L"DBG_TOOL_x64_REGISTER_TEST.exe";
+    const std::wstring TARGET_WINDOW_TITLE = LR"(DBG_TOOL_x64_REGISTER_TEST.exe)";
+    const DWORD        FALLBACK_PID        = 23000;
 
-    RemoteParams(DWORD_PTR p1 = 0, DWORD_PTR p2 = 0, DWORD_PTR p3 = 0, DWORD_PTR p4 = 0) :
-        param1(p1), param2(p2), param3(p3), param4(p4)
+    // 目标函数地址
+    namespace FunctionAddresses
     {
-    }
-};
-
-/**
- * @brief 字符串参数结构体
- */
-struct RemoteStringParams
-{
-    DWORD_PTR intParam1;
-    DWORD_PTR intParam2;
-    wchar_t   strParam1[256];
-    wchar_t   strParam2[256];
-
-    RemoteStringParams(DWORD_PTR p1 = 0, DWORD_PTR p2 = 0, const wchar_t* s1 = L"", const wchar_t* s2 = L"") :
-        intParam1(p1), intParam2(p2)
-    {
-        wcscpy_s(strParam1, s1 ? s1 : L"");
-        wcscpy_s(strParam2, s2 ? s2 : L"");
-    }
-};
+        const LPVOID CALL_00 = reinterpret_cast<LPVOID>(0x00081046);
+        const LPVOID CALL_01 = reinterpret_cast<LPVOID>(0x00081299);
+        const LPVOID CALL_02 = reinterpret_cast<LPVOID>(0x00081177);
+    } // namespace FunctionAddresses
+} // namespace Constants
 
 ///////////////////////////////////////////////////////////////////////////////////
-/// 原有的进程查找函数（保持不变）
+/// 进程查找模块
 ///////////////////////////////////////////////////////////////////////////////////
 
-/**
- * @brief 根据窗口标题获取进程PID（宽字符版本）
- * @param windowTitle 窗口标题
- * @return 进程PID，如果找不到返回0
- */
-DWORD GetProcessPIDByWindowTitle(const std::wstring& windowTitle)
+class ProcessFinder
 {
-    if (windowTitle.empty())
+public:
+    /**
+     * @brief 根据窗口标题获取进程PID
+     */
+    static DWORD GetPIDByWindowTitle(const std::wstring& windowTitle)
     {
-        std::wcerr << L"错误: 窗口标题不能为空" << std::endl;
-        return 0;
-    }
-
-    HWND hWindow = ::FindWindow(nullptr, windowTitle.c_str());
-    if (hWindow == nullptr)
-    {
-        DWORD errorCode = ::GetLastError();
-        std::wcerr << L"错误: 找不到窗口 '" << windowTitle << L"', 错误代码: " << errorCode << std::endl;
-        return 0;
-    }
-
-    DWORD processId = 0;
-    DWORD threadId  = ::GetWindowThreadProcessId(hWindow, &processId);
-
-    if (processId == 0)
-    {
-        std::wcerr << L"错误: 无法获取进程PID" << std::endl;
-        return 0;
-    }
-
-    std::wcout << L"找到进程: " << windowTitle << L", PID: " << processId << L", 线程ID: " << threadId << std::endl;
-
-    return processId;
-}
-
-
-/**
- * @brief 根据进程名称获取进程PID（宽字符版本）
- * @param processName 进程名称（如: L"notepad.exe"）
- * @return 进程PID，如果找不到返回0
- */
-DWORD GetProcessPIDByName(const std::wstring& processName)
-{
-    if (processName.empty())
-    {
-        std::wcerr << L"错误: 进程名称不能为空" << std::endl;
-        return 0;
-    }
-
-    HANDLE hSnapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (hSnapshot == INVALID_HANDLE_VALUE)
-    {
-        std::wcerr << L"错误: 无法创建进程快照" << std::endl;
-        return 0;
-    }
-
-    PROCESSENTRY32W processEntry;
-    processEntry.dwSize = sizeof(PROCESSENTRY32W);
-
-    DWORD targetPid = 0;
-
-    if (::Process32FirstW(hSnapshot, &processEntry))
-    {
-        do
+        if (windowTitle.empty())
         {
-            if (_wcsicmp(processEntry.szExeFile, processName.c_str()) == 0)
+            LogError(L"窗口标题不能为空");
+            return 0;
+        }
+
+        HWND hWindow = ::FindWindow(nullptr, windowTitle.c_str());
+        if (!hWindow)
+        {
+            LogError(L"找不到窗口 '" + windowTitle + L"'", ::GetLastError());
+            return 0;
+        }
+
+        DWORD processId = 0;
+        DWORD threadId  = ::GetWindowThreadProcessId(hWindow, &processId);
+
+        if (processId == 0)
+        {
+            LogError(L"无法获取进程PID");
+            return 0;
+        }
+
+        LogInfo(L"找到进程: " + windowTitle + L", PID: " + std::to_wstring(processId) + L", 线程ID: " +
+                std::to_wstring(threadId));
+        return processId;
+    }
+
+    /**
+     * @brief 根据进程名称获取进程PID
+     */
+    static DWORD GetPIDByName(const std::wstring& processName)
+    {
+        if (processName.empty())
+        {
+            LogError(L"进程名称不能为空");
+            return 0;
+        }
+
+        std::unique_ptr<std::remove_pointer<HANDLE>::type, decltype(&::CloseHandle)> hSnapshot(
+                ::CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0), ::CloseHandle);
+
+        if (!hSnapshot || hSnapshot.get() == INVALID_HANDLE_VALUE)
+        {
+            LogError(L"无法创建进程快照", ::GetLastError());
+            return 0;
+        }
+
+        PROCESSENTRY32W processEntry = { sizeof(PROCESSENTRY32W) };
+        DWORD           targetPid    = 0;
+
+        if (::Process32FirstW(hSnapshot.get(), &processEntry))
+        {
+            do
             {
-                targetPid = processEntry.th32ProcessID;
-                std::wcout << L"找到进程: " << processName << L", PID: " << targetPid << std::endl;
-                break;
+                if (_wcsicmp(processEntry.szExeFile, processName.c_str()) == 0)
+                {
+                    targetPid = processEntry.th32ProcessID;
+                    LogInfo(L"找到进程: " + processName + L", PID: " + std::to_wstring(targetPid));
+                    break;
+                }
             }
-        }
-        while (::Process32NextW(hSnapshot, &processEntry));
-    }
-    else
-    {
-        DWORD errorCode = ::GetLastError();
-        std::wcerr << L"错误: 枚举进程失败，错误代码: " << errorCode << std::endl;
-    }
-
-    ::CloseHandle(hSnapshot);
-
-    if (targetPid == 0)
-    {
-        std::wcerr << L"错误: 找不到进程 '" << processName << L"'" << std::endl;
-    }
-
-    return targetPid;
-}
-
-
-/**
- * @brief 根据窗口类名获取进程PID
- * @param className 窗口类名
- * @return 进程PID，如果找不到返回0
- */
-DWORD GetProcessPIDByClassName(const std::wstring& className)
-{
-    if (className.empty())
-    {
-        std::wcerr << L"错误: 窗口类名不能为空" << std::endl;
-        return 0;
-    }
-
-    HWND hWindow = ::FindWindow(className.c_str(), nullptr);
-    if (hWindow == nullptr)
-    {
-        DWORD errorCode = ::GetLastError();
-        std::wcerr << L"错误: 找不到类名为 '" << className << L"' 的窗口, 错误代码: " << errorCode << std::endl;
-        return 0;
-    }
-
-    DWORD processId = 0;
-    ::GetWindowThreadProcessId(hWindow, &processId);
-
-    if (processId == 0)
-    {
-        std::wcerr << L"错误: 无法获取进程PID" << std::endl;
-        return 0;
-    }
-
-    std::wcout << L"找到窗口类: " << className << L", PID: " << processId << std::endl;
-
-    return processId;
-}
-
-///////////////////////////////////////////////////////////////////////////////////
-/// 内存操作函数
-///////////////////////////////////////////////////////////////////////////////////
-
-/**
- * @brief 在远程进程中分配内存并写入数据
- */
-LPVOID AllocateAndWriteRemoteMemory(HANDLE hProcess, LPVOID localData, SIZE_T dataSize)
-{
-    if (!hProcess || !localData || dataSize == 0)
-    {
-        return nullptr;
-    }
-
-    // 在远程进程中分配内存
-    LPVOID remoteMemory = ::VirtualAllocEx(hProcess, nullptr, dataSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-    if (remoteMemory == nullptr)
-    {
-        std::wcerr << L"错误: 无法在远程进程中分配内存" << std::endl;
-        return nullptr;
-    }
-
-    // 将数据写入远程内存
-    SIZE_T bytesWritten = 0;
-    if (!::WriteProcessMemory(hProcess, remoteMemory, localData, dataSize, &bytesWritten))
-    {
-        std::wcerr << L"错误: 无法写入远程内存" << std::endl;
-        ::VirtualFreeEx(hProcess, remoteMemory, 0, MEM_RELEASE);
-        return nullptr;
-    }
-
-    std::wcout << L"远程内存分配成功: 0x" << std::hex << remoteMemory << L", 大小: " << std::dec << dataSize << L" 字节"
-               << std::endl;
-
-    return remoteMemory;
-}
-
-/**
- * @brief 释放远程内存
- */
-void FreeRemoteMemory(HANDLE hProcess, LPVOID remoteMemory)
-{
-    if (hProcess && remoteMemory)
-    {
-        ::VirtualFreeEx(hProcess, remoteMemory, 0, MEM_RELEASE);
-        std::wcout << L"已释放远程内存: 0x" << std::hex << remoteMemory << std::dec << std::endl;
-    }
-}
-
-///////////////////////////////////////////////////////////////////////////////////
-/// 架构检测和地址分析函数（保持不变）
-///////////////////////////////////////////////////////////////////////////////////
-
-/**
- * @brief 判断当前进程是32位还是64位
- */
-bool IsProcess64Bit()
-{
-#if defined(_WIN64)
-    return true; /// 编译为64位程序
-#else
-    /// 32位程序运行在64位系统上？
-    BOOL isWow64 = FALSE;
-    if (IsWow64Process(GetCurrentProcess(), &isWow64))
-    {
-        return isWow64; /// 如果是WOW64，说明系统是64位
-    }
-    return false;
-#endif
-}
-
-
-/**
- * @brief 判断目标进程是32位还是64位
- */
-bool IsTargetProcess64Bit(DWORD processId)
-{
-    HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, processId);
-    if (hProcess == nullptr)
-    {
-        return false;
-    }
-
-    BOOL isWow64 = FALSE;
-    bool is64Bit = false;
-
-    if (IsWow64Process(hProcess, &isWow64))
-    {
-        /// 如果是WOW64进程，说明目标进程是32位运行在64位系统上
-        /// 如果不是WOW64进程，在64位系统上就是64位进程
-        is64Bit = !isWow64;
-    }
-
-    CloseHandle(hProcess);
-    return is64Bit;
-}
-
-
-/**
- * @brief x86 架构地址分析
- */
-void AnalyzeAddressX86(ULONG_PTR address, DWORD processId)
-{
-    std::wcout << L"  - x86地址分析:" << std::endl;
-
-    /// x86 典型地址范围
-    if (address == 0)
-    {
-        std::wcout << L"    * NULL指针" << std::endl;
-    }
-    else if (address < 0x10000)
-    {
-        std::wcout << L"    * 小整数参数: " << address;
-        /// 常见的小整数含义
-        if (address == 0)
-            std::wcout << L" (NULL/FALSE)";
-        else if (address == 1)
-            std::wcout << L" (TRUE)";
-        else if (address == 0xFFFFFFFF)
-            std::wcout << L" (INVALID_HANDLE_VALUE/-1)";
-        else if (address == 0xDEADBEEF)
-            std::wcout << L" (调试标记)";
-        else if (address == 0xBABABABA)
-            std::wcout << L" (调试标记)";
-        std::wcout << std::endl;
-    }
-    else if (address >= 0x00400000 && address <= 0x7FFFFFFF)
-    {
-        std::wcout << L"    * 用户模式地址空间" << std::endl;
-
-        /// 常见的x86模块基址
-        if (address >= 0x00400000 && address <= 0x10000000)
-        {
-            std::wcout << L"    * 可能为EXE/DLL代码段 (.text)" << std::endl;
-        }
-        else if (address >= 0x10000000 && address <= 0x70000000)
-        {
-            std::wcout << L"    * 可能为DLL模块基址" << std::endl;
-        }
-        else if (address >= 0x70000000 && address <= 0x7FFFFFFF)
-        {
-            std::wcout << L"    * 可能为系统DLL区域" << std::endl;
-        }
-
-        /// 检查对齐
-        if ((address & 0xFFFF) == 0)
-        {
-            std::wcout << L"    * 64K对齐 - 可能为模块基址" << std::endl;
-        }
-    }
-    else if (address >= 0x80000000 && address <= 0xFFFFFFFF)
-    {
-        std::wcout << L"    * 内核模式地址空间 (x86)" << std::endl;
-        std::wcout << L"    * 警告: 用户模式无法访问" << std::endl;
-    }
-    else
-    {
-        std::wcout << L"    * 非标准地址范围" << std::endl;
-    }
-}
-
-/**
- * @brief x64 架构地址分析
- */
-void AnalyzeAddressX64(ULONG_PTR address, DWORD processId)
-{
-    std::wcout << L"  - x64地址分析:" << std::endl;
-
-    /// x64 典型地址范围
-    if (address == 0)
-    {
-        std::wcout << L"    * NULL指针" << std::endl;
-    }
-    else if (address < 0x10000)
-    {
-        std::wcout << L"    * 小整数参数: " << address;
-        /// 常见的小整数含义
-        if (address == 0)
-            std::wcout << L" (NULL/FALSE)";
-        else if (address == 1)
-            std::wcout << L" (TRUE)";
-        else if (address == 0xFFFFFFFF)
-            std::wcout << L" (INVALID_HANDLE_VALUE/-1)";
-        else if (address == 0xDEADBEEF)
-            std::wcout << L" (调试标记)";
-        else if (address == 0xBABABABA)
-            std::wcout << L" (调试标记)";
-        std::wcout << std::endl;
-    }
-    else if (address >= 0x0000000000010000 && address <= 0x000007FFFFFFFFFF)
-    {
-        std::wcout << L"    * 用户模式地址空间 (低128TB)" << std::endl;
-
-        /// x64 典型的模块基址
-        if (address >= 0x0000000100000000 && address <= 0x0000000500000000)
-        {
-            std::wcout << L"    * 可能为EXE/DLL代码段" << std::endl;
-        }
-        else if (address >= 0x0000000500000000 && address <= 0x000007FFFFFFFFFF)
-        {
-            std::wcout << L"    * 可能为堆/数据段" << std::endl;
-        }
-
-        /// 检查对齐
-        if ((address & 0xFFFF) == 0)
-        {
-            std::wcout << L"    * 64K对齐 - 可能为模块基址" << std::endl;
-        }
-    }
-    else if (address >= 0x0000080000000000 && address <= 0x00000FFFFFFFFFFF)
-    {
-        std::wcout << L"    * 用户模式地址空间 (高128TB)" << std::endl;
-    }
-    else if (address >= 0xFFFF080000000000 && address <= 0xFFFFFFFFFFFFFFFF)
-    {
-        std::wcout << L"    * 内核模式地址空间 (x64)" << std::endl;
-        std::wcout << L"    * 警告: 用户模式无法访问" << std::endl;
-    }
-    else
-    {
-        std::wcout << L"    * 非标准地址范围" << std::endl;
-    }
-
-    /// x64 特定的特征检查
-    if ((address & 0xFFFF000000000000) == 0x0000000000000000)
-    {
-        std::wcout << L"    * 规范地址格式" << std::endl;
-    }
-}
-
-
-/**
- * @brief 详细打印参数信息（支持x86和x64）
- */
-void PrintParameterDetails(LPVOID parameter, DWORD processId = 0)
-{
-    if (parameter == nullptr)
-    {
-        std::wcout << L"参数类型: 空指针" << std::endl;
-        return;
-    }
-
-    ULONG_PTR paramValue    = reinterpret_cast<ULONG_PTR>(parameter);
-    bool      isTarget64Bit = IsTargetProcess64Bit(processId);
-
-    std::wcout << L"参数详细信息:" << std::endl;
-    std::wcout << L"  - 指针地址: 0x" << std::hex << paramValue << std::dec << std::endl;
-    std::wcout << L"  - 整数值: " << paramValue << std::endl;
-    std::wcout << L"  - 目标进程架构: " << (isTarget64Bit ? L"x64" : L"x86") << std::endl;
-
-    /// 根据架构进行不同的地址分析
-    if (isTarget64Bit)
-    {
-        AnalyzeAddressX64(paramValue, processId);
-    }
-    else
-    {
-        AnalyzeAddressX86(paramValue, processId);
-    }
-}
-
-
-/**
- * @brief 简化的参数信息打印（自动检测架构）
- */
-void PrintParameterDetailsSimple(LPVOID parameter, DWORD processId = 0)
-{
-    if (parameter == nullptr)
-    {
-        std::wcout << L"参数: 空指针" << std::endl;
-        return;
-    }
-
-    ULONG_PTR paramValue    = reinterpret_cast<ULONG_PTR>(parameter);
-    bool      isTarget64Bit = IsTargetProcess64Bit(processId);
-
-    std::wcout << L"参数: 0x" << std::hex << paramValue << std::dec << L" (" << paramValue << L")" << std::endl;
-    std::wcout << L"目标架构: " << (isTarget64Bit ? L"x64" : L"x86") << std::endl;
-
-    /// 基本类型推断
-    if (paramValue == 0)
-    {
-        std::wcout << L"类型推断: NULL/0" << std::endl;
-    }
-    else if (paramValue == 1)
-    {
-        std::wcout << L"类型推断: TRUE/1" << std::endl;
-    }
-    else if (paramValue < 0x1000)
-    {
-        std::wcout << L"类型推断: 小整数参数" << std::endl;
-    }
-    else if (isTarget64Bit)
-    {
-        /// x64 地址推断
-        if (paramValue >= 0x0000000100000000 && paramValue <= 0x000007FFFFFFFFFF)
-        {
-            std::wcout << L"类型推断: x64用户模式地址" << std::endl;
-        }
-    }
-    else
-    {
-        /// x86 地址推断
-        if (paramValue >= 0x00400000 && paramValue <= 0x7FFFFFFF)
-        {
-            std::wcout << L"类型推断: x86用户模式地址" << std::endl;
-        }
-    }
-}
-
-///////////////////////////////////////////////////////////////////////////////////
-/// 增强的远程线程执行函数（支持多参数）
-///////////////////////////////////////////////////////////////////////////////////
-
-
-/**
- * @brief 在远程进程中创建线程执行指定函数
- * @param processId 目标进程ID
- * @param functionAddress 要执行的函数地址
- * @param parameter 传递给函数的参数
- * @param accessRights 进程访问权限
- * @return 成功返回true，失败返回false
- */
-bool ExecuteRemoteThread(DWORD processId, LPVOID functionAddress, LPVOID parameter = nullptr,
-                         DWORD accessRights = PROCESS_ALL_ACCESS)
-{
-    /// 参数验证
-    if (processId == 0)
-    {
-        std::wcerr << L"错误: 无效的进程ID" << std::endl;
-        return false;
-    }
-
-    if (functionAddress == nullptr)
-    {
-        std::wcerr << L"错误: 函数地址不能为空" << std::endl;
-        return false;
-    }
-
-    /// 打印调用信息
-    std::wcout << L"=== 远程线程调用信息 ===" << std::endl;
-    std::wcout << L"目标进程PID: " << processId << std::endl;
-    std::wcout << L"函数地址: 0x" << std::hex << functionAddress << std::dec << std::endl;
-    std::wcout << L"参数: ";
-    PrintParameterDetails(parameter, processId); /// 使用简化版本
-    std::wcout << L"访问权限: 0x" << std::hex << accessRights << std::dec << std::endl;
-    std::wcout << L"=========================" << std::endl;
-
-    /// 打开目标进程
-    HANDLE hProcess = ::OpenProcess(accessRights, FALSE, processId);
-    if (hProcess == nullptr)
-    {
-        DWORD errorCode = ::GetLastError();
-        std::wcerr << L"错误: 无法打开进程 PID=" << processId << L", 错误代码: " << errorCode << std::endl;
-        return false;
-    }
-
-    std::wcout << L"成功打开目标进程句柄: 0x" << std::hex << hProcess << std::dec << std::endl;
-
-    /// 在远程进程中创建线程
-    HANDLE hRemoteThread = ::CreateRemoteThread(hProcess, /// 目标进程句柄
-                                                nullptr,  /// 安全属性
-                                                0,        /// 堆栈大小
-                                                reinterpret_cast<LPTHREAD_START_ROUTINE>(functionAddress), /// 函数地址
-                                                parameter,                                                 /// 参数
-                                                0,                                                         /// 创建标志
-                                                nullptr                                                    /// 线程ID
-    );
-
-    bool success = false;
-
-    if (hRemoteThread != nullptr)
-    {
-        std::wcout << L"远程线程创建成功，线程句柄: 0x" << std::hex << hRemoteThread << std::dec << std::endl;
-
-        /// 等待线程完成（可选）
-        DWORD waitResult = ::WaitForSingleObject(hRemoteThread, 5000); /// 5秒超时
-        if (waitResult == WAIT_OBJECT_0)
-        {
-            std::wcout << L"远程线程执行完成" << std::endl;
-        }
-        else if (waitResult == WAIT_TIMEOUT)
-        {
-            std::wcout << L"警告: 远程线程执行超时" << std::endl;
-        }
-        else if (waitResult == WAIT_FAILED)
-        {
-            DWORD errorCode = ::GetLastError();
-            std::wcerr << L"错误: 等待远程线程失败，错误代码: " << errorCode << std::endl;
+            while (::Process32NextW(hSnapshot.get(), &processEntry));
         }
         else
         {
-            std::wcerr << L"错误: 等待远程线程返回未知状态: " << waitResult << std::endl;
+            LogError(L"枚举进程失败", ::GetLastError());
         }
+
+        if (targetPid == 0)
+        {
+            LogError(L"找不到进程 '" + processName + L"'");
+        }
+
+        return targetPid;
+    }
+
+    /**
+     * @brief 根据窗口类名获取进程PID
+     */
+    static DWORD GetPIDByClassName(const std::wstring& className)
+    {
+        if (className.empty())
+        {
+            LogError(L"窗口类名不能为空");
+            return 0;
+        }
+
+        HWND hWindow = ::FindWindow(className.c_str(), nullptr);
+        if (!hWindow)
+        {
+            LogError(L"找不到类名为 '" + className + L"' 的窗口", ::GetLastError());
+            return 0;
+        }
+
+        DWORD processId = 0;
+        ::GetWindowThreadProcessId(hWindow, &processId);
+
+        if (processId == 0)
+        {
+            LogError(L"无法获取进程PID");
+            return 0;
+        }
+
+        LogInfo(L"找到窗口类: " + className + L", PID: " + std::to_wstring(processId));
+        return processId;
+    }
+
+    /**
+     * @brief 获取目标进程PID（多种方法尝试）
+     */
+    static DWORD GetTargetPID()
+    {
+        // 方法1：使用进程名称
+        DWORD pid = GetPIDByName(Constants::TARGET_PROCESS_NAME);
+
+        // 方法2：如果方法1失败，使用窗口标题
+        if (pid == 0)
+        {
+            pid = GetPIDByWindowTitle(Constants::TARGET_WINDOW_TITLE);
+        }
+
+        // 方法3：如果方法2失败，使用备用PID
+        if (pid == 0)
+        {
+            pid = Constants::FALLBACK_PID;
+            LogInfo(L"使用备用PID: " + std::to_wstring(pid));
+        }
+
+        return pid;
+    }
+
+private:
+    static void LogInfo(const std::wstring& message)
+    {
+        std::wcout << L"[INFO] " << message << std::endl;
+    }
+
+    static void LogError(const std::wstring& message, DWORD errorCode = 0)
+    {
+        std::wcerr << L"[ERROR] " << message;
+        if (errorCode != 0)
+        {
+            std::wcerr << L", 错误代码: " << errorCode;
+        }
+        std::wcerr << std::endl;
+    }
+};
+
+///////////////////////////////////////////////////////////////////////////////////
+/// 内存操作模块
+///////////////////////////////////////////////////////////////////////////////////
+
+class RemoteMemoryManager
+{
+public:
+    /**
+     * @brief 在远程进程中分配内存并写入数据
+     */
+    static LPVOID AllocateAndWrite(HANDLE hProcess, LPVOID localData, SIZE_T dataSize)
+    {
+        if (!hProcess || !localData || dataSize == 0)
+        {
+            LogError(L"无效的参数");
+            return nullptr;
+        }
+
+        LPVOID remoteMemory = ::VirtualAllocEx(hProcess, nullptr, dataSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+        if (!remoteMemory)
+        {
+            LogError(L"无法在远程进程中分配内存", ::GetLastError());
+            return nullptr;
+        }
+
+        SIZE_T bytesWritten = 0;
+        if (!::WriteProcessMemory(hProcess, remoteMemory, localData, dataSize, &bytesWritten))
+        {
+            LogError(L"无法写入远程内存", ::GetLastError());
+            ::VirtualFreeEx(hProcess, remoteMemory, 0, MEM_RELEASE);
+            return nullptr;
+        }
+
+        LogInfo(L"远程内存分配成功: 0x" + AddressToHexString(remoteMemory) + L", 大小: " + std::to_wstring(dataSize) +
+                L" 字节");
+        return remoteMemory;
+    }
+
+    /**
+     * @brief 释放远程内存
+     */
+    static void Free(HANDLE hProcess, LPVOID remoteMemory)
+    {
+        if (hProcess && remoteMemory)
+        {
+            ::VirtualFreeEx(hProcess, remoteMemory, 0, MEM_RELEASE);
+            LogInfo(L"已释放远程内存: 0x" + AddressToHexString(remoteMemory));
+        }
+    }
+
+private:
+    static void LogInfo(const std::wstring& message)
+    {
+        std::wcout << L"[MEMORY] " << message << std::endl;
+    }
+
+    static void LogError(const std::wstring& message, DWORD errorCode = 0)
+    {
+        std::wcerr << L"[MEMORY ERROR] " << message;
+        if (errorCode != 0)
+        {
+            std::wcerr << L", 错误代码: " << errorCode;
+        }
+        std::wcerr << std::endl;
+    }
+
+    static std::wstring AddressToHexString(LPVOID address)
+    {
+        wchar_t buffer[32];
+        swprintf_s(buffer, L"%p", address);
+        return buffer;
+    }
+};
+
+///////////////////////////////////////////////////////////////////////////////////
+/// 架构检测模块
+///////////////////////////////////////////////////////////////////////////////////
+
+class ArchitectureDetector
+{
+public:
+    /**
+     * @brief 判断当前进程是32位还是64位
+     */
+    static bool IsCurrentProcess64Bit()
+    {
+#if defined(_WIN64)
+        return true;
+#else
+        BOOL isWow64 = FALSE;
+        return (IsWow64Process(GetCurrentProcess(), &isWow64) && isWow64);
+#endif
+    }
+
+    /**
+     * @brief 判断目标进程是32位还是64位
+     */
+    static bool IsTargetProcess64Bit(DWORD processId)
+    {
+        std::unique_ptr<std::remove_pointer<HANDLE>::type, decltype(&::CloseHandle)> hProcess(
+                ::OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, processId), ::CloseHandle);
+
+        if (!hProcess)
+            return false;
+
+        BOOL isWow64 = FALSE;
+        if (IsWow64Process(hProcess.get(), &isWow64))
+        {
+            return !isWow64; // 不是WOW64进程就是64位进程
+        }
+
+        return false;
+    }
+};
+
+///////////////////////////////////////////////////////////////////////////////////
+/// 地址分析模块
+///////////////////////////////////////////////////////////////////////////////////
+
+class AddressAnalyzer
+{
+public:
+    struct AddressInfo
+    {
+        std::wstring type;
+        std::wstring description;
+        std::wstring additionalInfo;
+    };
+
+    /**
+     * @brief 分析地址信息
+     */
+    static AddressInfo Analyze(ULONG_PTR address, DWORD processId = 0)
+    {
+        AddressInfo info;
+
+        if (address == 0)
+        {
+            info.type        = L"NULL指针";
+            info.description = L"空指针或零值";
+            return info;
+        }
+
+        if (address < 0x10000)
+        {
+            info.type           = L"小整数参数";
+            info.description    = L"数值: " + std::to_wstring(address);
+            info.additionalInfo = GetSmallIntegerMeaning(address);
+            return info;
+        }
+
+        bool isTarget64Bit = ArchitectureDetector::IsTargetProcess64Bit(processId);
+        if (isTarget64Bit)
+        {
+            return AnalyzeX64(address);
+        }
+        else
+        {
+            return AnalyzeX86(address);
+        }
+    }
+
+    /**
+     * @brief 详细打印参数信息
+     */
+    static void PrintDetailedInfo(LPVOID parameter, DWORD processId = 0)
+    {
+        if (!parameter)
+        {
+            std::wcout << L"参数类型: 空指针" << std::endl;
+            return;
+        }
+
+        ULONG_PTR paramValue = reinterpret_cast<ULONG_PTR>(parameter);
+        auto      info       = Analyze(paramValue, processId);
+
+        std::wcout << L"参数详细信息:" << std::endl;
+        std::wcout << L"  - 指针地址: 0x" << std::hex << paramValue << std::dec << std::endl;
+        std::wcout << L"  - 整数值: " << paramValue << std::endl;
+        std::wcout << L"  - 类型: " << info.type << std::endl;
+        std::wcout << L"  - 描述: " << info.description << std::endl;
+        if (!info.additionalInfo.empty())
+        {
+            std::wcout << L"  - 附加信息: " << info.additionalInfo << std::endl;
+        }
+    }
+
+    /**
+     * @brief 简化参数信息打印
+     */
+    static void PrintSimpleInfo(LPVOID parameter, DWORD processId = 0)
+    {
+        if (!parameter)
+        {
+            std::wcout << L"参数: 空指针" << std::endl;
+            return;
+        }
+
+        ULONG_PTR paramValue = reinterpret_cast<ULONG_PTR>(parameter);
+        auto      info       = Analyze(paramValue, processId);
+
+        std::wcout << L"参数: 0x" << std::hex << paramValue << std::dec << L" (" << paramValue << L") - " << info.type
+                   << std::endl;
+    }
+
+private:
+    static AddressInfo AnalyzeX86(ULONG_PTR address)
+    {
+        AddressInfo info;
+
+        if (address >= 0x00400000 && address <= 0x7FFFFFFF)
+        {
+            info.type = L"x86用户模式地址";
+            if (address >= 0x00400000 && address <= 0x10000000)
+            {
+                info.description = L"可能为EXE/DLL代码段 (.text)";
+            }
+            else if (address >= 0x10000000 && address <= 0x70000000)
+            {
+                info.description = L"可能为DLL模块基址";
+            }
+            else
+            {
+                info.description = L"用户模式地址空间";
+            }
+
+            if ((address & 0xFFFF) == 0)
+            {
+                info.additionalInfo = L"64K对齐 - 可能为模块基址";
+            }
+        }
+        else if (address >= 0x80000000 && address <= 0xFFFFFFFF)
+        {
+            info.type        = L"x86内核模式地址";
+            info.description = L"警告: 用户模式无法访问";
+        }
+        else
+        {
+            info.type        = L"非标准地址范围";
+            info.description = L"未知的内存区域";
+        }
+
+        return info;
+    }
+
+    static AddressInfo AnalyzeX64(ULONG_PTR address)
+    {
+        AddressInfo info;
+
+        if (address >= 0x0000000000010000 && address <= 0x000007FFFFFFFFFF)
+        {
+            info.type = L"x64用户模式地址";
+            if (address >= 0x0000000100000000 && address <= 0x0000000500000000)
+            {
+                info.description = L"可能为EXE/DLL代码段";
+            }
+            else
+            {
+                info.description = L"用户模式地址空间 (低128TB)";
+            }
+
+            if ((address & 0xFFFF) == 0)
+            {
+                info.additionalInfo = L"64K对齐 - 可能为模块基址";
+            }
+        }
+        else if (address >= 0xFFFF080000000000 && address <= 0xFFFFFFFFFFFFFFFF)
+        {
+            info.type        = L"x64内核模式地址";
+            info.description = L"警告: 用户模式无法访问";
+        }
+        else
+        {
+            info.type        = L"非标准地址范围";
+            info.description = L"未知的内存区域";
+        }
+
+        return info;
+    }
+
+    static std::wstring GetSmallIntegerMeaning(ULONG_PTR value)
+    {
+        switch (value)
+        {
+            case 0:
+                return L"NULL/FALSE";
+            case 1:
+                return L"TRUE";
+            case 0xFFFFFFFF:
+                return L"INVALID_HANDLE_VALUE/-1";
+            case 0xDEADBEEF:
+                return L"调试标记";
+            case 0xBABABABA:
+                return L"调试标记";
+            default:
+                return L"";
+        }
+    }
+};
+
+///////////////////////////////////////////////////////////////////////////////////
+/// 远程线程执行器
+///////////////////////////////////////////////////////////////////////////////////
+
+class RemoteThreadExecutor
+{
+public:
+    /**
+     * @brief 在远程进程中创建线程执行指定函数
+     */
+    static bool Execute(DWORD processId, LPVOID functionAddress, LPVOID parameter = nullptr,
+                        DWORD accessRights = PROCESS_ALL_ACCESS)
+    {
+        // 参数验证
+        if (processId == 0)
+        {
+            LogError(L"无效的进程ID");
+            return false;
+        }
+
+        if (!functionAddress)
+        {
+            LogError(L"函数地址不能为空");
+            return false;
+        }
+
+        // 打印调用信息
+        PrintExecutionInfo(processId, functionAddress, parameter, accessRights);
+
+        // 打开目标进程
+        std::unique_ptr<std::remove_pointer<HANDLE>::type, decltype(&::CloseHandle)> hProcess(
+                ::OpenProcess(accessRights, FALSE, processId), ::CloseHandle);
+
+        if (!hProcess)
+        {
+            LogError(L"无法打开进程 PID=" + std::to_wstring(processId), ::GetLastError());
+            return false;
+        }
+
+        LogInfo(L"成功打开目标进程句柄: 0x" + AddressToHexString(hProcess.get()));
+
+        HANDLE hRemoteThread = NULL;
+        {
+            // 创建远程线程
+            hRemoteThread = ::CreateRemoteThread(hProcess.get(), nullptr, 0,
+                                                 reinterpret_cast<LPTHREAD_START_ROUTINE>(functionAddress), parameter,
+                                                 0, nullptr);
+
+            if (!hRemoteThread)
+            {
+                LogError(L"创建远程线程失败", ::GetLastError());
+                return false;
+            }
+        }
+
+
+        // 等待线程完成
+        bool success = WaitForThreadCompletion(hRemoteThread);
 
         ::CloseHandle(hRemoteThread);
-        std::wcout << L"已关闭远程线程句柄" << std::endl;
-        success = true;
+        return success;
     }
-    else
-    {
-        DWORD errorCode = ::GetLastError();
-        std::wcerr << L"错误: 创建远程线程失败，错误代码: " << errorCode << std::endl;
 
-        /// 提供更详细的错误信息
-        switch (errorCode)
+    /**
+     * @brief 安全的远程执行函数，使用最小权限
+     */
+    static bool ExecuteSafely(DWORD processId, LPVOID functionAddress, LPVOID parameter = nullptr)
+    {
+        DWORD accessRights = PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION |
+                PROCESS_VM_WRITE | PROCESS_VM_READ;
+        return Execute(processId, functionAddress, parameter, accessRights);
+    }
+
+private:
+    static void PrintExecutionInfo(DWORD processId, LPVOID functionAddress, LPVOID parameter, DWORD accessRights)
+    {
+        std::wcout << L"=== 远程线程调用信息 ===" << std::endl;
+        std::wcout << L"目标进程PID: " << processId << std::endl;
+        std::wcout << L"函数地址: 0x" << std::hex << functionAddress << std::dec << std::endl;
+        std::wcout << L"参数: ";
+        AddressAnalyzer::PrintSimpleInfo(parameter, processId);
+        std::wcout << L"访问权限: 0x" << std::hex << accessRights << std::dec << std::endl;
+        std::wcout << L"=========================" << std::endl;
+    }
+
+    static bool WaitForThreadCompletion(HANDLE hThread)
+    {
+        LogInfo(L"远程线程创建成功，等待执行完成...");
+
+        DWORD waitResult = ::WaitForSingleObject(hThread, 5000); // 5秒超时
+
+        switch (waitResult)
         {
-            case ERROR_ACCESS_DENIED:
-                std::wcerr << L"详细: 访问被拒绝，可能权限不足" << std::endl;
-                break;
-            case ERROR_INVALID_HANDLE:
-                std::wcerr << L"详细: 无效的进程句柄" << std::endl;
-                break;
-            case ERROR_NOT_ENOUGH_MEMORY:
-                std::wcerr << L"详细: 内存不足" << std::endl;
-                break;
-            case ERROR_INVALID_PARAMETER:
-                std::wcerr << L"详细: 参数无效" << std::endl;
-                break;
+            case WAIT_OBJECT_0:
+                LogInfo(L"远程线程执行完成");
+                return true;
+            case WAIT_TIMEOUT:
+                LogWarning(L"远程线程执行超时");
+                return false;
+            case WAIT_FAILED:
+                LogError(L"等待远程线程失败", ::GetLastError());
+                return false;
             default:
-                std::wcerr << L"详细: 未知错误" << std::endl;
-                break;
+                LogError(L"等待远程线程返回未知状态: " + std::to_wstring(waitResult));
+                return false;
         }
     }
 
-    ::CloseHandle(hProcess);
-    std::wcout << L"已关闭进程句柄" << std::endl;
-
-    if (success)
+    static void LogInfo(const std::wstring& message)
     {
-        std::wcout << L"远程线程调用操作成功完成" << std::endl;
-    }
-    else
-    {
-        std::wcerr << L"远程线程调用操作失败" << std::endl;
+        std::wcout << L"[EXECUTOR] " << message << std::endl;
     }
 
-    return success;
-}
-
-
-/**
- * @brief 安全的远程执行函数，使用最小权限
- * @param processId 目标进程ID
- * @param functionAddress 函数地址
- * @param parameter 参数
- * @return 成功返回true，失败返回false
- */
-bool ExecuteRemoteThreadSafely(DWORD processId, LPVOID functionAddress, LPVOID parameter = nullptr)
-{
-    /// 使用最小必要权限
-    DWORD accessRights = PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION | PROCESS_VM_WRITE |
-            PROCESS_VM_READ;
-
-    return ExecuteRemoteThread(processId, functionAddress, parameter, accessRights);
-}
-
-
-/**
- * @brief 示例用法1：通过窗口标题注入
- */
-void ExampleUsageByWindowTitle()
-{
-    const std::wstring windowTitle = LR"(DBG_TOOL_x64_REGISTER_TEST.exe)";
-
-    DWORD pid = GetProcessPIDByWindowTitle(windowTitle);
-    if (pid != 0)
+    static void LogWarning(const std::wstring& message)
     {
-        /// 注意：这里的地址需要根据实际情况调整
-        LPVOID targetFunction = reinterpret_cast<LPVOID>(0x00C91046);
-        LPVOID parameter      = reinterpret_cast<LPVOID>(123);
-
-        ExecuteRemoteThreadSafely(pid, targetFunction, parameter);
-    }
-}
-
-
-/**
- * @brief 示例用法2：通过进程名称注入
- */
-void ExampleUsageByProcessName()
-{
-    const std::wstring processName = L"DBG_TOOL_x64_REGISTER_TEST.exe";
-
-    DWORD pid = GetProcessPIDByName(processName);
-    if (pid != 0)
-    {
-        LPVOID targetFunction = reinterpret_cast<LPVOID>(0x00C91046);
-        LPVOID parameter      = reinterpret_cast<LPVOID>(123);
-
-        ExecuteRemoteThreadSafely(pid, targetFunction, parameter);
-    }
-}
-
-
-/**
- * @brief 优化的回调调用函数
- */
-void CallbackCall()
-{
-    std::wcout << L"=== 开始远程线程注入 ===" << std::endl;
-
-    DWORD pid = 0;
-
-    /// 方法1：使用进程名称获取PID
-    const std::wstring processName = L"DBG_TOOL_x64_REGISTER_TEST.exe";
-    pid                            = GetProcessPIDByName(processName);
-
-    /// 方法2：如果方法1失败，使用窗口标题
-    if (pid == 0)
-    {
-        const std::wstring windowTitle = LR"(DBG_TOOL_x64_REGISTER_TEST.exe)";
-        pid                            = GetProcessPIDByWindowTitle(windowTitle);
+        std::wcout << L"[EXECUTOR WARNING] " << message << std::endl;
     }
 
-    /// 方法3：如果方法2失败，使用硬编码PID（仅用于测试）
-    if (pid == 0)
+    static void LogError(const std::wstring& message, DWORD errorCode = 0)
     {
-        pid = 23000; /// 备用PID
-        std::wcout << L"使用备用PID: " << pid << std::endl;
-    }
-
-    if (pid != 0)
-    {
-        // LPVOID functionAddress = reinterpret_cast<LPVOID>(0x00C91046); /// 目标函数地址 call00=00C91046
-        // LPVOID functionAddress = reinterpret_cast<LPVOID>(0x00C91299); /// 目标函数地址 call01=00C91299
-        LPVOID functionAddress = reinterpret_cast<LPVOID>(0x00C91177); /// 目标函数地址 call02=00C91177
-
-
-        LPVOID parameter = reinterpret_cast<LPVOID>(123);
-
-        if (ExecuteRemoteThreadSafely(pid, functionAddress, parameter))
+        std::wcerr << L"[EXECUTOR ERROR] " << message;
+        if (errorCode != 0)
         {
-            std::wcout << L"远程线程注入成功完成" << std::endl;
+            std::wcerr << L", 错误代码: " << errorCode;
+        }
+        std::wcerr << std::endl;
+    }
+
+    static std::wstring AddressToHexString(LPVOID address)
+    {
+        wchar_t buffer[32];
+        swprintf_s(buffer, L"%p", address);
+        return buffer;
+    }
+};
+
+///////////////////////////////////////////////////////////////////////////////////
+/// 主应用程序
+///////////////////////////////////////////////////////////////////////////////////
+
+class RemoteInjectorApp
+{
+public:
+    void Run()
+    {
+        Initialize();
+
+        std::wcout << L"=== 远程线程注入示例 ===" << std::endl;
+
+        if (InjectToTargetProcess())
+        {
+            std::wcout << L"=== 注入操作完成 ===" << std::endl;
         }
         else
         {
-            std::wcerr << L"远程线程注入失败" << std::endl;
+            std::wcerr << L"=== 注入操作失败 ===" << std::endl;
         }
     }
-    else
+
+private:
+    void Initialize()
     {
-        std::wcerr << L"错误: 无法获取有效的进程PID" << std::endl;
-    }
-}
-
-
-/**
- * @brief 枚举所有匹配的进程
- * @param processName 进程名称
- * @return 匹配的PID列表
- */
-auto FindAllProcessesByName(const std::wstring& processName) -> std::vector<DWORD>
-{
-    std::vector<DWORD> pids;
-
-    HANDLE hSnapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (hSnapshot == INVALID_HANDLE_VALUE)
-    {
-        return pids;
+        setlocale(LC_ALL, "chs");
     }
 
-    PROCESSENTRY32W processEntry;
-    processEntry.dwSize = sizeof(PROCESSENTRY32W);
-
-    if (::Process32FirstW(hSnapshot, &processEntry))
+    bool InjectToTargetProcess()
     {
-        do
+        DWORD pid = ProcessFinder::GetTargetPID();
+        if (pid == 0)
         {
-            if (_wcsicmp(processEntry.szExeFile, processName.c_str()) == 0)
-            {
-                pids.push_back(processEntry.th32ProcessID);
-            }
+            std::wcerr << L"错误: 无法获取有效的进程PID" << std::endl;
+            return false;
         }
-        while (::Process32NextW(hSnapshot, &processEntry));
-    }
 
-    ::CloseHandle(hSnapshot);
-    return pids;
-}
+        // 选择要调用的函数
+        LPVOID targetFunction = Constants::FunctionAddresses::CALL_01;
+        LPVOID parameter      = reinterpret_cast<LPVOID>(123);
+
+        return RemoteThreadExecutor::ExecuteSafely(pid, targetFunction, parameter);
+    }
+};
+
+///////////////////////////////////////////////////////////////////////////////////
+/// 程序入口点
+///////////////////////////////////////////////////////////////////////////////////
 
 int main()
 {
-    setlocale(LC_ALL, "chs");
-    std::wcout << L"=== 远程线程注入示例 ===" << std::endl;
-
-    /// 使用优化后的版本
-    CallbackCall();
-
-    // 或者使用其他示例
-    // ExampleUsageByWindowTitle();
-    // ExampleUsageByProcessName();
-
-    std::wcout << L"=== 程序执行完毕 ===" << std::endl;
+    RemoteInjectorApp app;
+    app.Run();
     return 0;
 }
