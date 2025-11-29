@@ -16,13 +16,24 @@ namespace Constants
     const std::wstring TARGET_WINDOW_TITLE = LR"(DBG_TOOL_x64_REGISTER_TEST.exe)";
     const DWORD        FALLBACK_PID        = 23000;
 
-    // 目标函数地址
+    /// 目标函数地址
     namespace FunctionAddresses
     {
         const LPVOID CALL_00 = reinterpret_cast<LPVOID>(0x00081046);
         const LPVOID CALL_01 = reinterpret_cast<LPVOID>(0x00081299);
         const LPVOID CALL_02 = reinterpret_cast<LPVOID>(0x00081177);
+
     } // namespace FunctionAddresses
+
+    namespace FunctionName
+    {
+        const LPCSTR CALL_00 = "call00";
+        const LPCSTR CALL_01 = "call01";
+        const LPCSTR CALL_02 = "call02";
+
+
+    } // namespace FunctionName
+
 } // namespace Constants
 
 ///////////////////////////////////////////////////////////////////////////////////
@@ -144,15 +155,16 @@ public:
         return processId;
     }
 
+
     /**
      * @brief 获取目标进程PID（多种方法尝试）
      */
     static DWORD GetTargetPID()
     {
-        // 方法1：使用进程名称
+        /// 方法1：使用进程名称
         DWORD pid = GetPIDByName(Constants::TARGET_PROCESS_NAME);
 
-        // 方法2：如果方法1失败，使用窗口标题
+        /// 方法2：如果方法1失败，使用窗口标题
         if (pid == 0)
         {
             pid = GetPIDByWindowTitle(Constants::TARGET_WINDOW_TITLE);
@@ -498,7 +510,7 @@ public:
     static bool Execute(DWORD processId, LPVOID functionAddress, LPVOID parameter = nullptr,
                         DWORD accessRights = PROCESS_ALL_ACCESS)
     {
-        // 参数验证
+        /// 参数验证
         if (processId == 0)
         {
             LogError(L"无效的进程ID");
@@ -511,10 +523,10 @@ public:
             return false;
         }
 
-        // 打印调用信息
+        /// 打印调用信息
         PrintExecutionInfo(processId, functionAddress, parameter, accessRights);
 
-        // 打开目标进程
+        /// 打开目标进程
         std::unique_ptr<std::remove_pointer<HANDLE>::type, decltype(&::CloseHandle)> hProcess(
                 ::OpenProcess(accessRights, FALSE, processId), ::CloseHandle);
 
@@ -528,7 +540,7 @@ public:
 
         HANDLE hRemoteThread = NULL;
         {
-            // 创建远程线程
+            /// 创建远程线程
             hRemoteThread = ::CreateRemoteThread(hProcess.get(), nullptr, 0,
                                                  reinterpret_cast<LPTHREAD_START_ROUTINE>(functionAddress), parameter,
                                                  0, nullptr);
@@ -541,12 +553,14 @@ public:
         }
 
 
-        // 等待线程完成
+        /// 等待线程完成
         bool success = WaitForThreadCompletion(hRemoteThread);
 
         ::CloseHandle(hRemoteThread);
         return success;
     }
+
+    //////////////////////////////////////////////////////////////////
 
     /**
      * @brief 安全的远程执行函数，使用最小权限
@@ -659,7 +673,8 @@ private:
             return false;
         }
 
-        // 选择要调用的函数
+
+        /// 选择要调用的函数
         LPVOID targetFunction = Constants::FunctionAddresses::CALL_01;
         LPVOID parameter      = reinterpret_cast<LPVOID>(123);
 

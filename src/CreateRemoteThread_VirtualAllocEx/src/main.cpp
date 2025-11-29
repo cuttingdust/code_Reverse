@@ -195,13 +195,13 @@ public:
 /// 裸函数注入器
 ///////////////////////////////////////////////////////////////////////////////////
 
-class NakedFunctionInjector
+class DLLInjector
 {
 public:
     /**
      * @brief 直接注入裸函数到远程进程
      */
-    static bool InjectNakedFunction(DWORD processId, LPVOID nakedFunction)
+    static bool InjectDLL(DWORD processId, LPVOID nakedFunction)
     {
         auto shellcode = InlineAssemblyTemplate::CreateAndPrintAssembly(0x01, 0x02, (DWORD)nakedFunction);
 
@@ -822,7 +822,7 @@ public:
         bool success = false;
 
         /// 使用裸函数注入
-        if (NakedFunctionInjector::InjectNakedFunction(processId, Constants::FunctionAddresses::CALL_02))
+        if (DLLInjector::InjectDLL(processId, Constants::FunctionAddresses::CALL_02))
         {
             std::wcout << L"裸函数注入成功" << std::endl;
             success = true;

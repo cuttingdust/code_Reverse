@@ -31,4 +31,6 @@ protected:
 public:
     CButton      m_chk_btn;
     afx_msg void OnBnClickedChkStick();
+    afx_msg void OnBnClickedCALL00();
+    afx_msg void OnBnClickedCALL01();
 };

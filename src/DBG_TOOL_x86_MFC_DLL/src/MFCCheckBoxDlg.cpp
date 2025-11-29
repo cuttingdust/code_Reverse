@@ -61,6 +61,8 @@ ON_WM_SYSCOMMAND()
 ON_WM_PAINT()
 ON_WM_QUERYDRAGICON()
 ON_BN_CLICKED(IDC_CHK_STICK, &MFCCheckBoxDlg::OnBnClickedChkStick)
+ON_BN_CLICKED(IDC_CALL00, &MFCCheckBoxDlg::OnBnClickedCALL00)
+ON_BN_CLICKED(IDC_CALL01, &MFCCheckBoxDlg::OnBnClickedCALL01)
 END_MESSAGE_MAP()
 
 
@@ -159,5 +161,25 @@ void MFCCheckBoxDlg::OnBnClickedChkStick()
     {
         /// 取消置顶
         SetWindowPos(&wndNoTopMost, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOREDRAW);
+    }
+}
+
+void MFCCheckBoxDlg::OnBnClickedCALL00()
+{
+    __asm
+    {
+           mov eax, 0x001D1046 /// 目标函数地址
+           call eax /// 调用函数
+    }
+}
+
+void MFCCheckBoxDlg::OnBnClickedCALL01()
+{
+    __asm
+    {
+           push 0x123 /// 第一个参数
+           mov eax, 0x001D1299 /// 目标函数地址
+           call eax /// 调用函数
+           add esp, 4 /// 清理栈
     }
 }

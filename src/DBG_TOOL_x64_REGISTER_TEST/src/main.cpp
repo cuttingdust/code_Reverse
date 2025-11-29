@@ -20,6 +20,8 @@ int call02(int a, int b)
 
 int main()
 {
+    // HMODULE hDll = ::LoadLibrary(L"DBG_TOOL_x86_MFC_DLL.dll");
+
     //	MessageBoxA(0, 0, 0, 0);//ctrl+G 转到 MessageBoxA 下断
     printf("MessageBoxA=%p 行号=%d \r\n", MessageBoxA, __LINE__);
     int 计数 = 1;

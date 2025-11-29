@@ -79,6 +79,7 @@ add_subdirectory(ReadProcessMemory_basepointer)
 add_subdirectory(WriteProcessMemory)
 add_subdirectory(CreateRemoteThread)
 add_subdirectory(CreateRemoteThread_VirtualAllocEx)
+add_subdirectory(CreateRemoteThread_DLL)
 ###########################################
 if(CMAKE_GENERATOR_PLATFORM STREQUAL "x64")
 add_subdirectory(assembly_x64)
