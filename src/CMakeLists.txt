@@ -94,6 +94,8 @@ add_subdirectory(DBG_TOOL_x64_IF_TEST)
 add_subdirectory(DBG_TOOL_x86_WHILE_TEST)
 add_subdirectory(DBG_TOOL_x64_REGISTER_TEST) # 错误 注入器现在只能注入x86的
 add_subdirectory(DBG_TOOL_x86_MFC_DLL)
+add_subdirectory(vsconf)
+add_subdirectory(vsconf2)
 
 
 # # 拷贝assert目录到输出目录
