@@ -77,7 +77,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance
         *lastSlash = 0;
 
     // 使用安全的字符串拼接
-    if (FAILED(StringCchCatA(path, MAX_PATH, "\\encrypted.bin")))
+    if (FAILED(StringCchCatA(path, MAX_PATH, "\\payload.bin")))
     {
         DebugPrint("[!] 路径拼接失败\n");
         CloseHandle(hMutex);

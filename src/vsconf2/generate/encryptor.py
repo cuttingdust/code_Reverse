@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import sys
 import re
+import os
+import shutil
 
 def custom_encrypt(data: bytes) -> bytes:
     """一个包含多步变换的私有加密函数"""
@@ -20,6 +22,31 @@ def custom_encrypt(data: bytes) -> bytes:
         byte ^= (key_stream[i % key_len] ^ 0x55)
         encrypted.append(byte)
     return bytes(encrypted)
+
+def copy_to_output_dir(source_file):
+    """拷贝文件到输出目录的相对路径"""
+    # 脚本所在目录（generate目录）
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # 构建相对路径：从generate目录到out/bin.x86
+    # 假设目录结构：generate/../out/bin.x86
+    target_dir = os.path.join(script_dir, "../../../", "out", "bin.x86")
+    target_dir = os.path.normpath(target_dir)  # 规范化路径
+    
+    # 确保目标目录存在
+    os.makedirs(target_dir, exist_ok=True)
+    
+    # 目标文件路径
+    target_file = os.path.join(target_dir, os.path.basename(source_file))
+    
+    try:
+        shutil.copy2(source_file, target_file)
+        print(f"[✓] 已拷贝文件到: {target_file}")
+        return target_file
+    except Exception as e:
+        print(f"[✗] 拷贝失败: {e}")
+        return None
+
 
 def main():
     if len(sys.argv) != 2:
@@ -53,9 +80,11 @@ def main():
     print(f"const SIZE_T g_encryptedShellcodeSize = {len(encrypted)};")
     
     # 可选：保存加密后的二进制文件，用于其他用途
-    with open('encrypted.bin', 'wb') as f:
+    with open('payload.bin', 'wb') as f:
         f.write(encrypted)
-    print("[*] 已保存加密后的二进制文件: encrypted.bin")
+    print("[*] 已保存加密后的二进制文件: payload.bin")
+    
+    copy_to_output_dir('payload.bin')
 
 if __name__ == "__main__":
     main()
